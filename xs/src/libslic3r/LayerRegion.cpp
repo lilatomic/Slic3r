@@ -8,7 +8,6 @@
 
 namespace Slic3r {
 
-/// Creates a new Flow object with the arguments and the variables of this LayerRegion
 Flow
 LayerRegion::flow(FlowRole role, bool bridge, double width) const
 {
@@ -22,7 +21,6 @@ LayerRegion::flow(FlowRole role, bool bridge, double width) const
     );
 }
 
-/// Merges this->slices with union_ex, and then repopulates this->slices.surfaces
 void
 LayerRegion::merge_slices()
 {
@@ -35,8 +33,6 @@ LayerRegion::merge_slices()
         this->slices.surfaces.push_back(Surface(stInternal, *expoly));
 }
 
-/// Creates a new PerimeterGenerator object
-/// Which will return the perimeters by its construction
 void
 LayerRegion::make_perimeters(const SurfaceCollection &slices, SurfaceCollection* fill_surfaces)
 {
@@ -70,11 +66,8 @@ LayerRegion::make_perimeters(const SurfaceCollection &slices, SurfaceCollection*
     g.process();
 }
 
-/// Processes bridges with holes which are internal features.
-/// Detects same-orientation bridges and merges them.
-/// Processes and groups top and bottom surfaces
-/// This function reads layer->slices and lower_layer->slices
-/// and writes this->bridged and this->fill_surfaces, so it's thread-safe.
+// This function reads layer->slices and lower_layer->slices
+// and writes this->bridged and this->fill_surfaces, so it's thread-safe.
 void
 LayerRegion::process_external_surfaces()
 {
@@ -86,7 +79,7 @@ LayerRegion::process_external_surfaces()
         
         if (this->layer()->lower_layer != NULL && surfaces[j].is_bridge()) {
             // If this bridge has one or more holes that are internal surfaces
-            // (thus not visible from the outside), like a slab sustained by
+            // (thus not visible from the outside), like a slab sustained by 
             // pillars, include them in the bridge in order to have better and
             // more continuous bridging.
             for (int i = 0; i < surfaces[j].expolygon.holes.size(); ++i) {
@@ -139,7 +132,7 @@ LayerRegion::process_external_surfaces()
             
                 if (this->layer()->object()->config.support_material) {
                     append_to(this->bridged, bd.coverage());
-                    this->unsupported_bridge_edges.append(bd.unsupported_edges());
+                    this->unsupported_bridge_edges.append(bd.unsupported_edges()); 
                 }
             }
         }
@@ -227,8 +220,6 @@ LayerRegion::process_external_surfaces()
     this->fill_surfaces = std::move(new_surfaces);
 }
 
-/// If no solid layers are requested, turns top/bottom surfaces to internal
-/// Turns too small internal regions into solid regions according to the user setting
 void
 LayerRegion::prepare_fill_surfaces()
 {
@@ -268,7 +259,6 @@ LayerRegion::prepare_fill_surfaces()
     }
 }
 
-///  Gets smallest area by squaring the Flow's scaled spacing
 double
 LayerRegion::infill_area_threshold() const
 {

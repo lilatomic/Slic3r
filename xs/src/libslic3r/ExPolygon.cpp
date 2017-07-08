@@ -450,37 +450,25 @@ ExPolygon::triangulate_pp(Polygons* polygons) const
 void
 ExPolygon::triangulate_p2t(Polygons* polygons) const
 {
-    for (const ExPolygon &ex : simplify_polygons_ex(*this, true)) {
+    ExPolygons expp = simplify_polygons_ex(*this, true);
+    
+    for (ExPolygons::const_iterator ex = expp.begin(); ex != expp.end(); ++ex) {
+        // TODO: prevent duplicate points
+
         // contour
         std::vector<p2t::Point*> ContourPoints;
-        
-        Polygon contour = ex.contour;
-        contour.remove_duplicate_points();
-        for (const Point &point : contour.points) {
+        for (Points::const_iterator point = ex->contour.points.begin(); point != ex->contour.points.end(); ++point) {
             // We should delete each p2t::Point object
-            ContourPoints.push_back(new p2t::Point(point.x, point.y));
+            ContourPoints.push_back(new p2t::Point(point->x, point->y));
         }
         p2t::CDT cdt(ContourPoints);
 
         // holes
-        for (Polygon hole : ex.holes) {
-            hole.remove_duplicate_points();
+        for (Polygons::const_iterator hole = ex->holes.begin(); hole != ex->holes.end(); ++hole) {
             std::vector<p2t::Point*> points;
-            Point prev = hole.points.back();
-            for (Point &point : hole.points) {
-                // Shrink large polygons by reducing each coordinate by 1 in the
-                // general direction of the last point as we wind around
-                // This normally wouldn't work in every case, but our upscaled polygons
-                // have little chance to create new duplicate points with this method.
-                // For information on why this was needed, see:
-                //    https://code.google.com/p/poly2tri/issues/detail?id=90
-                //    https://github.com/raptor/clip2tri
-                (point.x - prev.x) > 0 ? point.x-- : point.x++;
-                (point.y - prev.y) > 0 ? point.y-- : point.y++;
-                prev = point;
-                
+            for (Points::const_iterator point = hole->points.begin(); point != hole->points.end(); ++point) {
                 // will be destructed in SweepContext::~SweepContext
-                points.push_back(new p2t::Point(point.x, point.y));
+                points.push_back(new p2t::Point(point->x, point->y));
             }
             cdt.AddHole(points);
         }
@@ -489,17 +477,18 @@ ExPolygon::triangulate_p2t(Polygons* polygons) const
         cdt.Triangulate();
         std::vector<p2t::Triangle*> triangles = cdt.GetTriangles();
         
-        for (p2t::Triangle* triangle : triangles) {
+        for (std::vector<p2t::Triangle*>::const_iterator triangle = triangles.begin(); triangle != triangles.end(); ++triangle) {
             Polygon p;
             for (int i = 0; i <= 2; ++i) {
-                p2t::Point* point = triangle->GetPoint(i);
+                p2t::Point* point = (*triangle)->GetPoint(i);
                 p.points.push_back(Point(point->x, point->y));
             }
             polygons->push_back(p);
         }
-        
-        for (p2t::Point* it : ContourPoints)
-            delete it;
+
+        for(std::vector<p2t::Point*>::iterator it = ContourPoints.begin(); it != ContourPoints.end(); ++it) {
+            delete *it;
+        }
     }
 }
 

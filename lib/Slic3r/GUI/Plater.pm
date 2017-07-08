@@ -49,7 +49,7 @@ sub new {
     my $self = $class->SUPER::new($parent, -1, wxDefaultPosition, wxDefaultSize, wxTAB_TRAVERSAL);
     $self->{config} = Slic3r::Config->new_from_defaults(qw(
         bed_shape complete_objects extruder_clearance_radius skirts skirt_distance brim_width
-        serial_port serial_speed host_type print_host octoprint_apikey shortcuts filament_colour
+        serial_port serial_speed octoprint_host octoprint_apikey overridable filament_colour
     ));
     $self->{model} = Slic3r::Model->new;
     $self->{print} = Slic3r::Print->new;
@@ -366,37 +366,9 @@ sub new {
         {
             my $o = $self->{settings_override_panel} = Slic3r::GUI::Plater::OverrideSettingsPanel->new($self,
                 on_change => sub {
-                    my ($opt_key) = @_;
-                    
-                    my ($preset) = $self->selected_presets('print');
-                    $preset->load_config;
-                    
-                    # If this option is not in the override panel it means it was manually deleted,
-                    # so let's restore the profile value.
-                    if (!$self->{settings_override_config}->has($opt_key)) {
-                        $preset->_dirty_config->set($opt_key, $preset->_config->get($opt_key));
-                    } else {
-                        # Apply the overrides to the current Print preset, potentially making it dirty
-                        $preset->_dirty_config->apply($self->{settings_override_config});
-                        
-                        # If this is a configured shortcut (and not just a dirty option),
-                        # save it now.
-                        if (any { $_ eq $opt_key } @{$preset->dirty_config->shortcuts}) {
-                            $preset->save([$opt_key]);
-                        }
-                    }
-                    
-                    $self->load_presets;
                     $self->config_changed;
-                    
-                    # Reload the open tab if any
-                    if (my $print_tab = $self->GetFrame->{preset_editor_tabs}{print}) {
-                        $print_tab->load_presets;
-                        $print_tab->reload_preset;
-                    }
                 });
-            $o->can_add(0);
-            $o->can_delete(1);
+            $o->set_editable(1);
             $o->set_opt_keys([ Slic3r::GUI::PresetEditor::Print->options ]);
             $self->{settings_override_config} = Slic3r::Config->new;
             $o->set_default_config($self->{settings_override_config});
@@ -562,14 +534,6 @@ sub _on_change_combobox {
         return 0 if !$self->prompt_unsaved_changes;
     }
     wxTheApp->CallAfter(sub {
-        # Close the preset editor tab if any
-        if (exists $self->GetFrame->{preset_editor_tabs}{$group}) {
-            my $tabpanel = $self->GetFrame->{tabpanel};
-            $tabpanel->DeletePage($tabpanel->GetPageIndex($self->GetFrame->{preset_editor_tabs}{$group}));
-            delete $self->GetFrame->{preset_editor_tabs}{$group};
-            $tabpanel->SetSelection(0); # without this, a newly created tab will not be selected by wx
-        }
-        
         $self->_on_select_preset($group);
         
         # This will remove the "(modified)" mark from any dirty preset handled here.
@@ -598,19 +562,31 @@ sub _on_select_preset {
         my $o_config = $self->{settings_override_config};
         my $o_panel  = $self->{settings_override_panel};
         
-        my $shortcuts = $config->get('shortcuts');
+        if ($changed) {
+            # Preserve current options if re-selecting the same preset
+            $o_config->clear;
+        }
         
-        # Re-populate the override panel with the configured shortcuts
-        # and the dirty options.
-        $o_config->clear;
-        foreach my $opt_key (@$shortcuts, $presets[0]->dirty_options) {
-            # Don't add shortcut for shortcuts!
-            next if $opt_key eq 'shortcuts';
+        my $overridable = $config->get('overridable');
+        
+        # Add/remove options (we do it this way for preserving current options)
+        foreach my $opt_key (@$overridable) {
+            # Populate option with the default value taken from configuration
+            # (re-set the override always, because if we here it means user
+            # switched to this preset or opened/closed the editor, so he expects
+            # the new values set in the editor to be used).
             $o_config->set($opt_key, $config->get($opt_key));
+        }
+        foreach my $opt_key (@{$o_config->get_keys}) {
+            # Keep options listed among overridable and options added on the fly
+            if ((none { $_ eq $opt_key } @$overridable)
+                && (any { $_ eq $opt_key } $o_panel->fixed_options)) {
+                $o_config->erase($opt_key);
+            }
         }
         
         $o_panel->set_default_config($config);
-        $o_panel->set_fixed_options(\@$shortcuts);
+        $o_panel->set_fixed_options(\@$overridable);
         $o_panel->update_optgroup;
     } elsif ($group eq 'printer') {
         # reload print and filament settings to honor their compatible_printer options
@@ -723,7 +699,7 @@ sub load_presets {
             }
         }
         
-        $self->{print}->placeholder_parser->set_multiple("${group}_preset", [ @preset_names ]);
+        $self->{print}->placeholder_parser->set("${group}_preset", [ @preset_names ]);
     }
 }
 
@@ -766,54 +742,19 @@ sub selected_presets {
 sub show_preset_editor {
     my ($self, $group, $i) = @_;
     
-    wxTheApp->CallAfter(sub {
-        my @presets = $self->selected_presets($group);
+    my $class = "Slic3r::GUI::PresetEditorDialog::" . ucfirst($group);
+    my $dlg = $class->new($self);
     
-        my $preset_editor;
-        my $dlg;
-        my $mainframe = $self->GetFrame;
-        my $tabpanel = $mainframe->{tabpanel};
-        if (exists $mainframe->{preset_editor_tabs}{$group}) {
-            # we already have an open editor
-            $tabpanel->SetSelection($tabpanel->GetPageIndex($mainframe->{preset_editor_tabs}{$group}));
-            return;
-        } elsif ($Slic3r::GUI::Settings->{_}{tabbed_preset_editors}) {
-            my $class = "Slic3r::GUI::PresetEditor::" . ucfirst($group);
-            $mainframe->{preset_editor_tabs}{$group} = $preset_editor = $class->new($self->GetFrame);
-            $tabpanel->AddPage($preset_editor, ucfirst($group) . " Settings", 1);
-        } else {
-            my $class = "Slic3r::GUI::PresetEditorDialog::" . ucfirst($group);
-            $dlg = $class->new($self);
-            $preset_editor = $dlg->preset_editor;
-        }
+    my @presets = $self->selected_presets($group);
+    $dlg->preset_editor->select_preset_by_name($presets[$i // 0]->name);
+    $dlg->ShowModal;
     
-        $preset_editor->select_preset_by_name($presets[$i // 0]->name);
-        $preset_editor->on_value_change(sub {
-            # Re-load the presets in order to toggle the (modified) suffix
-            $self->load_presets;
-        
-            # Update shortcuts
-            $self->_on_select_preset($group);
-        
-            # Use the new config wherever we actually use its contents
-            $self->config_changed;
-        });
-        my $cb = sub {
-            my ($group, $preset) = @_;
-        
-            # Re-load the presets as they might have changed.
-            $self->load_presets;
-        
-            # Select the preset in plater too
-            $self->select_preset_by_name($preset->name, $group, $i, 1);
-        };
-        $preset_editor->on_select_preset($cb);
-        $preset_editor->on_save_preset($cb);
+    # Re-load the presets as they might have changed.
+    $self->load_presets;
     
-        if ($dlg) {
-            $dlg->Show;
-        }
-    });
+    # Select the preset that was last selected in the editor.
+    $self->select_preset_by_name
+        ($dlg->preset_editor->current_preset->name, $group, $i, 1);
 }
 
 # Returns the current config by merging the selected presets and the overrides.
@@ -824,7 +765,7 @@ sub config {
     my $config = Slic3r::Config->new_from_defaults;
     
     # get defaults also for the values tracked by the Plater's config
-    # (for example 'shortcuts')
+    # (for example 'overridable')
     $config->apply(Slic3r::Config->new_from_defaults(@{$self->{config}->get_keys}));
     
     my %classes = map { $_ => "Slic3r::GUI::PresetEditor::".ucfirst($_) }
@@ -1410,8 +1351,8 @@ sub config_changed {
                 $self->{btn_print}->Hide;
             }
             $self->Layout;
-        } elsif ($opt_key eq 'print_host') {
-            if ($config->get('print_host')) {
+        } elsif ($opt_key eq 'octoprint_host') {
+            if ($config->get('octoprint_host')) {
                 $self->{btn_send_gcode}->Show;
             } else {
                 $self->{btn_send_gcode}->Hide;
@@ -1731,7 +1672,7 @@ sub on_export_completed {
             $message = "File added to print queue";
             $do_print = 1;
         } elsif ($self->{send_gcode_file}) {
-            $message = "Sending G-code file to the " . $self->{config}->host_type . " server...";
+            $message = "Sending G-code file to the OctoPrint server...";
             $send_gcode = 1;
         } else {
             $message = "G-code file exported to " . $self->{export_gcode_output_file};
@@ -1775,7 +1716,8 @@ sub do_print {
     
     my %current_presets = $self->selected_presets;
     
-    my $printer_panel = $controller->add_printer($current_presets{printer}->[0], $self->config);
+    my $printer_name = $current_presets{printer}->[0]->name;
+    my $printer_panel = $controller->add_printer($printer_name, $self->config);
     
     my $filament_stats = $self->{print}->filament_stats;
     $filament_stats = { map { $current_presets{filament}[$_]->name => $filament_stats->{$_} } keys %$filament_stats };
@@ -1804,33 +1746,23 @@ sub prepare_send {
 
         my $ua = LWP::UserAgent->new;
         $ua->timeout(5);
-        my $res;
-        if ($self->{config}->print_host) {
-            if($self->{config}->host_type eq 'octoprint'){
-                $res = $ua->get(
-                    "http://" . $self->{config}->print_host . "/api/files/local",
-                    'X-Api-Key' => $self->{config}->octoprint_apikey,
-                );
-            }else {
-                $res = $ua->get(
-                    "http://" . $self->{config}->print_host . "/rr_files",
-                );            
-            }
-        }
+        my $res = $ua->get(
+            "http://" . $self->{config}->octoprint_host . "/api/files/local",
+            'X-Api-Key' => $self->{config}->octoprint_apikey,
+        );
         $progress->Destroy;
         if ($res->is_success) {
-            my $searchterm = ($self->{config}->host_type eq 'octoprint') ? '/"name":\s*"\Q$filename\E"/' : '"'.$filename.'"';            
-            if ($res->decoded_content =~ $searchterm) {
+            if ($res->decoded_content =~ /"name":\s*"\Q$filename\E"/) {
                 my $dialog = Wx::MessageDialog->new($self,
                     "It looks like a file with the same name already exists in the server. "
                         . "Shall I overwrite it?",
-                    $self->{config}->host_type, wxICON_WARNING | wxYES | wxNO);
+                    'OctoPrint', wxICON_WARNING | wxYES | wxNO);
                 if ($dialog->ShowModal() == wxID_NO) {
                     return;
                 }
             }
         } else {
-            my $message = "Error while connecting to the " . $self->{config}->host_type . " server: " . $res->status_line;
+            my $message = "Error while connecting to the OctoPrint server: " . $res->status_line;
             Slic3r::GUI::show_error($self, $message);
             return;
         }
@@ -1849,52 +1781,24 @@ sub send_gcode {
     $ua->timeout(180);
     
     my $path = Slic3r::encode_path($self->{send_gcode_file});
-    my $filename = basename($self->{print}->output_filepath($main::opt{output} // ''));
-    my $res;
-    if($self->{config}->print_host){
-        if($self->{config}->host_type eq 'octoprint'){
-            $res = $ua->post(
-                "http://" . $self->{config}->print_host . "/api/files/local",
-                Content_Type => 'form-data',
-                'X-Api-Key' => $self->{config}->octoprint_apikey,
-                Content => [
-                    # OctoPrint doesn't like Windows paths so we use basename()
-                    # Also, since we need to read from filesystem we process it through encode_path()
-                    file => [ $path, basename($path) ],
-                    print => $self->{send_gcode_file_print} ? 1 : 0,
-                ],
-            );
-        }else{
-            # slurp the file we would send into a string - should be someplace to reference this but could not find it?
-            local $/=undef;
-            open my ($gch,$path);
-            my $gcode=<$gch>;
-            close($gch);
-
-            # get the time string            
-            my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime(time);
-            my $t = sprintf("%4d-%02d-%02dT%02d:%02d:%02d",$year+1900,$mon+1,$mday,$hour,$min,$sec);
-
-            my $req = HTTP::Request->new(POST => "http://" . $self->{config}->print_host . "/rr_upload?name=0:/gcodes/" . basename($path) . "&time=$t",);
-            $req->content( $gcode );
-            $res = $ua->request($req);
- 
-            if ($res->is_success) {
-                if ($self->{send_gcode_file_print}) {
-                    $res = $ua->get(
-                        "http://" . $self->{config}->print_host . "/rr_gcode?gcode=M32%20" . basename($path),
-                    );
-                }
-            }
-        }
-    }
-
+    my $res = $ua->post(
+        "http://" . $self->{config}->octoprint_host . "/api/files/local",
+        Content_Type => 'form-data',
+        'X-Api-Key' => $self->{config}->octoprint_apikey,
+        Content => [
+            # OctoPrint doesn't like Windows paths so we use basename()
+            # Also, since we need to read from filesystem we process it through encode_path()
+            file => [ $path, basename($path) ],
+            print => $self->{send_gcode_file_print} ? 1 : 0,
+        ],
+    );
+    
     $self->statusbar->StopBusy;
     
     if ($res->is_success) {
-        $self->statusbar->SetStatusText("G-code file successfully uploaded to the " . $self->{config}->host_type . " server");
+        $self->statusbar->SetStatusText("G-code file successfully uploaded to the OctoPrint server");
     } else {
-        my $message = "Error while uploading to the " . $self->{config}->host_type . " server: " . $res->status_line;
+        my $message = "Error while uploading to the OctoPrint server: " . $res->status_line;
         Slic3r::GUI::show_error($self, $message);
         $self->statusbar->SetStatusText($message);
     }
@@ -2643,7 +2547,7 @@ use base 'Wx::Dialog';
 sub new {
     my $class = shift;
     my ($parent, $filename) = @_;
-    my $self = $class->SUPER::new($parent, -1, "Send to Server", wxDefaultPosition,
+    my $self = $class->SUPER::new($parent, -1, "Send to OctoPrint", wxDefaultPosition,
         [400, -1]);
     
     $self->{filename} = $filename;
@@ -2652,7 +2556,7 @@ sub new {
     my $optgroup;
     $optgroup = Slic3r::GUI::OptionsGroup->new(
         parent  => $self,
-        title   => 'Send to Server',
+        title   => 'Send to OctoPrint',
         on_change => sub {
             my ($opt_id) = @_;
             

@@ -18,8 +18,6 @@ class ExPolygon
     public:
     Polygon contour;
     Polygons holes;
-    ExPolygon() {};
-    explicit ExPolygon(const Polygon &_contour) : contour(_contour) {};
     operator Points() const;
     operator Polygons() const;
     void scale(double factor);

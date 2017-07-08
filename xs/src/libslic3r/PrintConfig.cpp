@@ -629,17 +629,6 @@ PrintConfigDef::PrintConfigDef()
     def->enum_labels.push_back("No extrusion");
     def->default_value = new ConfigOptionEnum<GCodeFlavor>(gcfRepRap);
 
-    def = this->add("host_type", coEnum);
-    def->label = "Host type";
-    def->tooltip = "Select Octoprint or Duet to connect to your machine via LAN";
-    def->cli = "host-type=s";
-    def->enum_keys_map = ConfigOptionEnum<HostType>::get_enum_values();
-    def->enum_values.push_back("octoprint");
-    def->enum_values.push_back("duet");
-    def->enum_labels.push_back("Octoprint");
-    def->enum_labels.push_back("Duet");
-    def->default_value = new ConfigOptionEnum<HostType>(htOctoprint);
-    
     def = this->add("infill_acceleration", coFloat);
     def->label = "Infill";
     def->category = "Speed > Acceleration";
@@ -829,9 +818,9 @@ PrintConfigDef::PrintConfigDef()
     def->cli = "octoprint-apikey=s";
     def->default_value = new ConfigOptionString("");
 
-    def = this->add("print_host", coString);
+    def = this->add("octoprint_host", coString);
     def->label = "Host or IP";
-    def->tooltip = "Slic3r can upload G-code files to an Octoprint/Duet server. This field should contain the hostname or IP address of the server instance.";
+    def->tooltip = "Slic3r can upload G-code files to OctoPrint. This field should contain the hostname or IP address of the OctoPrint instance.";
     def->cli = "octoprint-host=s";
     def->default_value = new ConfigOptionString("");
 
@@ -864,9 +853,8 @@ PrintConfigDef::PrintConfigDef()
     def->cli = "overhangs|detect-bridging-perimeters!";
     def->default_value = new ConfigOptionBool(true);
     
-    def = this->add("shortcuts", coStrings);
-    def->label = "Shortcuts";
-    def->aliases.push_back("overridable");
+    def = this->add("overridable", coStrings);
+    def->label = "Overridable options";
     {
         ConfigOptionStrings* opt = new ConfigOptionStrings();
         opt->values.push_back("support_material");
@@ -935,14 +923,18 @@ PrintConfigDef::PrintConfigDef()
     def->height = 60;
     def->default_value = new ConfigOptionStrings();
 
-    def = this->add("printer_notes", coString);
+    def = this->add("printer_notes", coStrings);
     def->label = "Printer notes";
-    def->tooltip = "You can put your notes regarding the printer here. This text will be added to the G-code header comments.";
-    def->cli = "printer-notes=s";
+    def->tooltip = "You can put your notes regarding the printer here.";
+    def->cli = "printer-notes=s@";
     def->multiline = true;
     def->full_width = true;
     def->height = 130;
-    def->default_value = new ConfigOptionString("");
+    {
+        ConfigOptionStrings* opt = new ConfigOptionStrings();
+        opt->values.push_back("");
+        def->default_value = opt;
+    }
 
     def = this->add("print_settings_id", coString);
     def->default_value = new ConfigOptionString("");
@@ -966,14 +958,6 @@ PrintConfigDef::PrintConfigDef()
     def->cli = "raft-layers=i";
     def->min = 0;
     def->default_value = new ConfigOptionInt(0);
-
-    def = this->add("regions_overlap", coFloat);
-    def->label = "Regions/extruders overlap";
-    def->category = "Extruders";
-    def->tooltip = "This setting applies an additional overlap between regions printed with distinct extruders or distinct settings. This shouldn't be needed under normal circumstances.";
-    def->sidetext = "mm";
-    def->cli = "regions-overlap=s";
-    def->default_value = new ConfigOptionFloat(0);
 
     def = this->add("raft_offset", coFloat);
     def->label = "Raft offset";
@@ -1399,7 +1383,7 @@ PrintConfigDef::PrintConfigDef()
 
     def = this->add("support_material_interface_speed", coFloatOrPercent);
     def->label = "↳ interface";
-    def->full_label = "Support material interface speed";
+    def->category = "Support material interface speed";
     def->gui_type = "f_enum_open";
     def->category = "Support material";
     def->tooltip = "Speed for printing support material interface layers. If expressed as percentage (for example 50%) it will be calculated over support material speed.";
@@ -1713,8 +1697,6 @@ PrintConfigBase::_handle_legacy(t_config_option_key &opt_key, std::string &value
         std::ostringstream oss;
         oss << "0x0," << p.value.x << "x0," << p.value.x << "x" << p.value.y << ",0x" << p.value.y;
         value = oss.str();
-    } else if (opt_key == "octoprint_host" && !value.empty()) {
-        opt_key = "print_host";
     } else if ((opt_key == "perimeter_acceleration" && value == "25")
         || (opt_key == "infill_acceleration" && value == "50")) {
         /*  For historical reasons, the world's full of configs having these very low values;
@@ -1737,7 +1719,7 @@ PrintConfigBase::_handle_legacy(t_config_option_key &opt_key, std::string &value
         || opt_key == "scale"  || opt_key == "duplicate_grid" 
         || opt_key == "start_perimeters_at_concave_points" 
         || opt_key == "start_perimeters_at_non_overhang" || opt_key == "randomize_start" 
-        || opt_key == "seal_position" || opt_key == "bed_size" || opt_key == "octoprint_host" 
+        || opt_key == "seal_position" || opt_key == "bed_size" 
         || opt_key == "print_center" || opt_key == "g0" || opt_key == "threads")
     {
         opt_key = "";

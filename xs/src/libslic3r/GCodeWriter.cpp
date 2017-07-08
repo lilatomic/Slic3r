@@ -1,5 +1,4 @@
 #include "GCodeWriter.hpp"
-#include "utils.hpp"
 #include <algorithm>
 #include <iomanip>
 #include <iostream>
@@ -34,50 +33,10 @@ GCodeWriter::set_extruders(const std::vector<unsigned int> &extruder_ids)
 }
 
 std::string
-GCodeWriter::notes() 
-{
-    std::ostringstream gcode;
-
-    // Write the contents of the three notes sections
-    // a semicolon at the beginning of each line.
-    if (this->config.notes.getString().size() > 0) {
-        gcode << "; Print Config Notes: \n";
-        std::vector<std::string> temp_line = split_at_regex(this->config.notes.getString(),"\n");
-        for (auto j = temp_line.cbegin(); j != temp_line.cend(); j++) {
-            gcode << "; " << *j << "\n";
-        }
-        gcode << "; \n";
-    }
-
-    for (auto i = this->config.filament_notes.values.cbegin(); i != this->config.filament_notes.values.cend(); i++) {
-        if (i->size() > 0) {
-            gcode << "; Filament notes: \n";
-            std::vector<std::string> temp_line = split_at_regex(*i,"\n");
-            for (auto j = temp_line.cbegin(); j != temp_line.cend(); j++) {
-                gcode << "; " << *j << "\n";
-            }
-            gcode << "; \n";
-        }
-    }
-
-    if (this->config.printer_notes.getString().size() > 0) {
-        gcode << "; Printer Config Notes: \n";
-        std::vector<std::string> temp_line = split_at_regex(this->config.printer_notes.getString(),"\n");
-        for (auto j = temp_line.cbegin(); j != temp_line.cend(); j++) {
-            gcode << "; " << *j << "\n";
-        }
-        gcode << "; \n";
-    }
-
-    return gcode.str();
-}
-
-
-std::string
 GCodeWriter::preamble()
 {
     std::ostringstream gcode;
-
+    
     if (FLAVOR_IS_NOT(gcfMakerWare)) {
         gcode << "G21 ; set units to millimeters\n";
         gcode << "G90 ; use absolute coordinates\n";
@@ -90,8 +49,7 @@ GCodeWriter::preamble()
         }
         gcode << this->reset_e(true);
     }
-
-
+    
     return gcode.str();
 }
 
