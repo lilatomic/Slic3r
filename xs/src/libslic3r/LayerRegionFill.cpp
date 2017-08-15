@@ -69,7 +69,7 @@ LayerRegion::make_fill()
                 group_attrib[i].fw = (surface.surface_type == stTop) ? top_solid_infill_flow.width : solid_infill_flow.width;
                 group_attrib[i].pattern = surface.surface_type == stTop ? this->region()->config.top_infill_pattern.value
                     : surface.is_bottom() ? this->region()->config.bottom_infill_pattern.value
-                    : ipRectilinear;
+                    : ipConcentric;
             }
             // Loop through solid groups, find compatible groups and append them to this one.
             for (size_t i = 0; i < groups.size(); ++i) {
@@ -175,7 +175,7 @@ LayerRegion::make_fill()
             density = 100.;
             fill_pattern = (surface.surface_type == stTop) ? this->region()->config.top_infill_pattern.value
                 : (surface.is_bottom() && !is_bridge)      ? this->region()->config.bottom_infill_pattern.value
-                : ipRectilinear;
+                : ipConcentric;
         } else if (density <= 0)
             continue;
         
